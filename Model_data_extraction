@@ -1,0 +1,67 @@
+import rasterio
+import pandas as pd
+import numpy as np
+import glob
+import os
+import re
+import time
+
+# ===============================
+# USER INPUT
+# ===============================
+META = r"D:\Hope\IMD_Station_Metadata_Decimal.csv"
+CFSv2_TMAX = r"D:\Hope\CFSv2_TMAX_Annual"
+CFSv2_TMIN = r"D:\Hope\CFSv2_TMIN_Annual"
+OUTPUT_CSV = r"D:\Hope\CFSv2_station_daily.csv"
+
+# ===============================
+# LOAD META
+# ===============================
+df = pd.read_csv(META, dtype=str)
+df['Code'] = df['Code'].astype(str).str.zfill(5)
+df['Latitude'] = df['Latitude'].astype(float)
+df['Longitude'] = df['Longitude'].astype(float)
+
+tmax_files = sorted(glob.glob(os.path.join(CFSv2_TMAX, "*.tif")))
+tmin_files = sorted(glob.glob(os.path.join(CFSv2_TMIN, "*.tif")))
+rows = []
+
+start_total = time.time()
+
+N_years = len(tmax_files)
+N_stations = len(df)
+
+for i, (tmax_fp, tmin_fp) in enumerate(zip(tmax_files, tmin_files), start=1):
+
+    year = int(re.search(r"(19|20)\d{2}", os.path.basename(tmax_fp)).group())
+
+    year_start = time.time()
+
+    with rasterio.open(tmax_fp) as src_tmax, rasterio.open(tmin_fp) as src_tmin:
+
+        ndays = src_tmax.count
+        dates = pd.date_range(f"{year}-01-01", periods=ndays, freq="D")
+
+        for _, r in df.iterrows():
+            code = r['Code']
+            lat = r['Latitude']
+            lon = r['Longitude']
+
+            tmax_vals = np.array(list(src_tmax.sample([(lon, lat)], indexes=range(1, ndays+1))))[0]
+            tmin_vals = np.array(list(src_tmin.sample([(lon, lat)], indexes=range(1, ndays+1))))[0]
+
+            for d, tx, tn in zip(dates, tmax_vals, tmin_vals):
+                rows.append({"Code": code, "Date": d, "CFSv2_TMAX": float(tx), "CFSv2_TMIN": float(tn)})
+
+    year_time = time.time() - year_start
+    eta = (N_years - i) * year_time
+
+    print(f"Year {year} done ({i}/{N_years}) - Year time: {year_time:.2f}s - ETA: {eta/60:.1f} mins")
+
+df_out = pd.DataFrame(rows)
+df_out.to_csv(OUTPUT_CSV, index=False)
+
+total_time = time.time() - start_total
+print(f"\n===== COMPLETED =====")
+print(f"Saved → {OUTPUT_CSV}")
+print(f"Total Time: {total_time/60:.2f} minutes ({total_time/3600:.2f} hours)")
