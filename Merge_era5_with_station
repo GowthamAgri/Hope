@@ -1,0 +1,87 @@
+import os
+import pandas as pd
+
+# -------------------------------------
+# USER PATHS
+# -------------------------------------
+imd_root = r"D:\Hope\Trial"                      # IMD processed folder
+era5_file = r"D:\Hope\ERA5_station_daily.csv"  # ERA5 single file
+output_root = r"D:\Hope\Trial\MERGED"                # output folder
+
+os.makedirs(output_root, exist_ok=True)
+
+# -------------------------------------
+# LOAD ERA5 ONCE
+# -------------------------------------
+era5 = pd.read_csv(era5_file)
+
+# Standardize ERA5 fields
+era5.rename(columns={'Code':'INDEX'}, inplace=True)
+era5['INDEX'] = era5['INDEX'].astype(str)       # match IMD type
+era5['date'] = pd.to_datetime(era5['Date'], errors='coerce')
+
+# -------------------------------------
+# WALK IMD FILES
+# -------------------------------------
+for root, dirs, files in os.walk(imd_root):
+
+    for file in files:
+
+        # Only process your processed IMD station files
+        if not file.endswith("_processed.xlsx"):
+            continue
+
+        input_path = os.path.join(root, file)
+
+        # Extract station INDEX from filename (before first '_')
+        code = file.split('_')[0]
+        code = str(code)
+
+        # Prepare output directory structure
+        rel = os.path.relpath(root, imd_root)
+        out_dir = os.path.join(output_root, rel)
+        os.makedirs(out_dir, exist_ok=True)
+
+        out_path = os.path.join(out_dir, file.replace("_processed.xlsx", "_merged.xlsx"))
+
+        # -------------------------------------
+        # LOAD IMD FILE
+        # -------------------------------------
+        imd = pd.read_excel(input_path)
+
+        # Standardize IMD columns
+        imd.columns = imd.columns.str.strip().str.upper()
+
+        # Force INDEX string for joining
+        imd['INDEX'] = imd['INDEX'].astype(str)
+
+        # -------------------------------------
+        # BUILD IMD DATE
+        # -------------------------------------
+        imd['date'] = pd.to_datetime(
+            dict(year=imd['YEAR'], month=imd['MN'], day=imd['DT']),
+            errors='coerce'
+        )
+
+        # -------------------------------------
+        # FILTER ERA5 FOR THIS STATION
+        # -------------------------------------
+        era5_sub = era5[era5['INDEX'] == code]
+
+        # -------------------------------------
+        # MERGE IMD + ERA5
+        # -------------------------------------
+        merged = pd.merge(
+            imd,
+            era5_sub[['INDEX','date','ERA5_TMAX','ERA5_TMIN']],
+            on=['INDEX','date'],
+            how='left'
+        )
+
+        # -------------------------------------
+        # SAVE OUTPUT
+        # -------------------------------------
+        merged.to_excel(out_path, index=False)
+        print(f"✔ Merged {code} → {out_path}")
+
+print("\n🎉 ALL DONE — ERA5 & IMD merged successfully for all stations!")
