@@ -1,0 +1,154 @@
+import os
+import pandas as pd
+import numpy as np
+from scipy.stats import pearsonr
+
+# ==== METRICS ====
+
+def bias(obs, mod):
+    return np.nanmean(mod - obs)
+
+def mae(obs, mod):
+    return np.nanmean(np.abs(mod - obs))
+
+def rmse(obs, mod):
+    return np.sqrt(np.nanmean((mod - obs)**2))
+
+def r_value(obs, mod):
+    mask = ~np.isnan(obs) & ~np.isnan(mod)
+    if mask.sum() < 2:
+        return np.nan
+    return pearsonr(obs[mask], mod[mask])[0]
+
+def NSE(obs, mod):
+    mask = ~np.isnan(obs) & ~np.isnan(mod)
+    if mask.sum() < 2:
+        return np.nan
+    return 1 - np.nansum((mod[mask]-obs[mask])**2) / np.nansum((obs[mask]-np.nanmean(obs[mask]))**2)
+
+def KGE(obs, mod):
+    mask = ~np.isnan(obs) & ~np.isnan(mod)
+    if mask.sum() < 2:
+        return np.nan
+    obs, mod = obs[mask], mod[mask]
+    r = np.corrcoef(obs, mod)[0,1]
+    alpha = np.nanstd(mod) / np.nanstd(obs)
+    beta = np.nanmean(mod) / np.nanmean(obs)
+    return 1 - np.sqrt((r-1)**2 + (alpha-1)**2 + (beta-1)**2)
+
+def Willmott_d(obs, mod):
+    mask = ~np.isnan(obs) & ~np.isnan(mod)
+    if mask.sum() < 2:
+        return np.nan
+    obs, mod = obs[mask], mod[mask]
+    num = np.nansum((mod-obs)**2)
+    den = np.nansum((np.abs(mod-np.nanmean(obs)) + np.abs(obs-np.nanmean(obs)))**2)
+    return 1 - num/den
+
+# ==== SEASON MAP ====
+
+season_map = {
+    12:'DJF',1:'DJF',2:'DJF',
+    3:'MAM',4:'MAM',5:'MAM',
+    6:'JJAS',7:'JJAS',8:'JJAS',9:'JJAS',
+    10:'ON',11:'ON'
+}
+
+# ==== USER PATHS ====  <<<<<<<< THIS IS WHAT YOU ASKED FOR
+
+INPUT_ROOT = r"D:\MET_Processed\MERGED"                      # main folder containing state folders
+OUTPUT_ROOT = r"D:\MET_Processed\MERGED\02_seasonal_metrics" # output folder
+
+os.makedirs(OUTPUT_ROOT, exist_ok=True)
+
+# ==== MAIN LOOP ====
+
+for root, dirs, files in os.walk(INPUT_ROOT):
+
+    for file in files:
+
+        # skip windows excel lock files
+        if file.startswith("~$"):
+            continue
+
+        # only process merged station files
+        if not file.endswith("_merged.xlsx"):
+            continue
+
+        fpath = os.path.join(root, file)
+
+        print(f"Processing: {fpath}")
+
+        try:
+            df = pd.read_excel(fpath)
+        except Exception as e:
+            print(f"❌ Error reading {fpath}: {e}")
+            continue
+
+        station = df['INDEX'].iloc[0]
+
+        df.replace(-9999, np.nan, inplace=True)
+        df['season'] = df['MN'].map(season_map)
+
+        df['TMEAN'] = (df['MAX'] + df['MIN']) / 2
+        df['DTR'] = df['MAX'] - df['MIN']
+
+        df['ERA5_TMEAN'] = (df['ERA5_TMAX'] + df['ERA5_TMIN']) / 2
+        df['ERA5_DTR'] = df['ERA5_TMAX'] - df['ERA5_TMIN']
+
+        df['CFSv2_TMEAN'] = (df['CFSv2_TMAX'] + df['CFSv2_TMIN']) / 2
+        df['CFSv2_DTR'] = df['CFSv2_TMAX'] - df['CFSv2_TMIN']
+
+        result_rows = []
+
+        for season in ['DJF','MAM','JJAS','ON']:
+            sdf = df[df['season'] == season]
+            if sdf.empty:
+                continue
+
+            variables = {
+                'TMAX': sdf['MAX'].values,
+                'TMIN': sdf['MIN'].values,
+                'TMEAN': sdf['TMEAN'].values,
+                'DTR': sdf['DTR'].values
+            }
+
+            models = {
+                'ERA5': {
+                    'TMAX': sdf['ERA5_TMAX'].values,
+                    'TMIN': sdf['ERA5_TMIN'].values,
+                    'TMEAN': sdf['ERA5_TMEAN'].values,
+                    'DTR': sdf['ERA5_DTR'].values
+                },
+                'CFSv2': {
+                    'TMAX': sdf['CFSv2_TMAX'].values,
+                    'TMIN': sdf['CFSv2_TMIN'].values,
+                    'TMEAN': sdf['CFSv2_TMEAN'].values,
+                    'DTR': sdf['CFSv2_DTR'].values
+                }
+            }
+
+            for var in variables:
+                obs = variables[var]
+                for model in models:
+                    mod = models[model][var]
+                    result_rows.append({
+                        'station': station,
+                        'season': season,
+                        'variable': var,
+                        'model': model,
+                        'bias': bias(obs, mod),
+                        'MAE': mae(obs, mod),
+                        'RMSE': rmse(obs, mod),
+                        'r': r_value(obs, mod),
+                        'NSE': NSE(obs, mod),
+                        'KGE': KGE(obs, mod),
+                        'Willmott_d': Willmott_d(obs, mod)
+                    })
+
+        out = pd.DataFrame(result_rows)
+        fout = os.path.join(OUTPUT_ROOT, f"{station}_season_metrics.xlsx")
+        out.to_excel(fout, index=False)
+        print(f"✓ Saved: {fout}")
+
+print("\n✔ Seasonal validation completed!")
