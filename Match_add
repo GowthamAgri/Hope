@@ -1,0 +1,33 @@
+import pandas as pd
+
+STATION_LIST_FILE = r"D:\Hope\IMD_Station_Code_List.csv"
+METADATA_FILE = r"D:\Hope\IMD-Metadata.xlsx"
+OUTPUT_FILE = r"D:\Hope\IMD_Station_Metadata_Matched.csv"
+
+# Load files
+df_codes = pd.read_csv(STATION_LIST_FILE, dtype=str)
+df_meta = pd.read_excel(METADATA_FILE, dtype=str)
+
+# Fix IMD code column name
+df_codes.rename(columns={"IMD_Code": "Code"}, inplace=True)
+
+# Fix trailing space in metadata column name
+df_meta.rename(columns={"Index ": "Code"}, inplace=True)
+
+# Strip spaces
+df_codes["Code"] = df_codes["Code"].str.strip()
+df_meta["Code"] = df_meta["Code"].str.strip()
+
+# Merge only matched stations
+df_merged = df_codes.merge(df_meta, on="Code", how="inner")
+
+# Fix encoding artifacts (Â°) in lat/lon if present
+for col in ["Latitude", "Longitude"]:
+    if col in df_merged.columns:
+        df_merged[col] = df_merged[col].str.replace("Â°", "°", regex=False)
+
+# Save final
+df_merged.to_csv(OUTPUT_FILE, index=False)
+
+print(f"Matched stations: {len(df_merged)}")
+print(f"Saved → {OUTPUT_FILE}")
