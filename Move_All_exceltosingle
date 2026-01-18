@@ -1,0 +1,30 @@
+import os
+import shutil
+
+MAIN_FOLDER = r"D:\Raw_Original_Data"
+TARGET_FOLDER = r"D:\Hope\Station_Full"
+
+os.makedirs(TARGET_FOLDER, exist_ok=True)
+
+extensions = (".csv", ".xlsx", ".xls", ".xlsm")  # now includes CSV
+
+count = 0
+
+for root, dirs, files in os.walk(MAIN_FOLDER):
+    for file in files:
+        if file.lower().endswith(extensions):
+            src = os.path.join(root, file)
+            dst = os.path.join(TARGET_FOLDER, file)
+
+            # Handle duplicate names
+            if os.path.exists(dst):
+                base, ext = os.path.splitext(file)
+                i = 1
+                while os.path.exists(os.path.join(TARGET_FOLDER, f"{base}_{i}{ext}")):
+                    i += 1
+                dst = os.path.join(TARGET_FOLDER, f"{base}_{i}{ext}")
+
+            shutil.move(src, dst)
+            count += 1
+
+print(f"Moved {count} files to: {TARGET_FOLDER}")
