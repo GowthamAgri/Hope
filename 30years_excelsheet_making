@@ -1,0 +1,80 @@
+import os
+import pandas as pd
+
+MAIN_INPUT  = r"D:\MET"
+MAIN_OUTPUT = r"D:\MET_Processed"
+
+START_DATE = "1990-01-01"
+END_DATE   = "2024-12-31"
+NODATA = -9999
+MIN_YEARS_REQUIRED = 10
+
+REQUIRED_COLS = ['INDEX', 'YEAR', 'MN', 'DT', 'MAX', 'MIN', 'RF', 'EVP']
+
+os.makedirs(MAIN_OUTPUT, exist_ok=True)
+
+full_dates = pd.date_range(start=START_DATE, end=END_DATE, freq='D')
+date_df = pd.DataFrame({
+    'YEAR': full_dates.year.astype(int),
+    'MN': full_dates.month.astype(int),
+    'DT': full_dates.day.astype(int)
+})
+
+for root, dirs, files in os.walk(MAIN_INPUT):
+
+    # Skip output folder to avoid re-processing
+    if os.path.abspath(root).startswith(os.path.abspath(MAIN_OUTPUT)):
+        continue
+
+    # Compute relative path mapping for output
+    rel = os.path.relpath(root, MAIN_INPUT)
+    out_dir = os.path.join(MAIN_OUTPUT, rel)
+    os.makedirs(out_dir, exist_ok=True)
+
+    for file in files:
+        ext = os.path.splitext(file)[1].lower()
+        if ext not in ['.xlsx', '.xls', '.csv']:
+            continue
+
+        input_path = os.path.join(root, file)
+        output_path = os.path.join(out_dir, os.path.splitext(file)[0] + "_processed.xlsx")
+
+        try:
+            if ext == '.csv':
+                df = pd.read_csv(input_path, index_col=False, low_memory=False, skipinitialspace=True)
+            else:
+                df = pd.read_excel(input_path)
+
+            df.columns = df.columns.str.strip().str.upper()
+
+            missing = [c for c in REQUIRED_COLS if c not in df.columns]
+            if missing:
+                print(f"⚠ Skipped {file}: Missing {missing}")
+                continue
+
+            for col in ['YEAR', 'MN', 'DT']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            df = df.dropna(subset=['YEAR','MN','DT'])
+            df[['YEAR','MN','DT']] = df[['YEAR','MN','DT']].astype(int)
+
+            years = df['YEAR'].nunique()
+            if years < MIN_YEARS_REQUIRED:
+                print(f"⏭️ Skipped {file}: Only {years} years")
+                continue
+
+            for col in ['MAX','MIN','RF','EVP']:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+            merged = pd.merge(date_df, df[REQUIRED_COLS], on=['YEAR','MN','DT'], how='left')
+
+            merged['INDEX'] = merged['INDEX'].ffill().bfill().fillna(NODATA)
+            merged[['MAX','MIN','RF','EVP']] = merged[['MAX','MIN','RF','EVP']].fillna(NODATA)
+
+            merged[REQUIRED_COLS].to_excel(output_path, index=False)
+            print(f"✅ Processed: {file} ({years} years)")
+
+        except Exception as e:
+            print(f"❌ Error processing {file}: {e}")
+
+print("\n🎉 COMPLETE!")
